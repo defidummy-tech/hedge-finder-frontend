@@ -1,0 +1,1200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🍀 Arbitrage Terminal | DeFiDummy</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide-react@latest/dist/umd/lucide-react.js"></script>
+</head>
+<body style="margin: 0; padding: 0;">
+  <div id="root"></div>
+  
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+    const { Search, TrendingUp, DollarSign, Activity, ExternalLink, RefreshCw, Zap, Target, BarChart3, LineChart, Info } = lucide;
+    
+    // IMPORTANT: Update API URL to Render!
+    const API_BASE_URL = 'https://hedge-deal-trader.onrender.com';
+    
+
+// Tooltip Component
+const Tooltip = ({ text, children }) => {
+  const [show, setShow] = useState(false);
+  
+  return (
+    <div className="relative inline-block">
+      <div 
+        onMouseEnter={() => setShow(true)}
+        onMouseLeave={() => setShow(false)}
+        className="cursor-help"
+      >
+        {children}
+      </div>
+      {show && (
+        <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-gradient-to-br from-slate-900 to-slate-800 border border-cyan-500/50 rounded-lg text-xs text-cyan-300 whitespace-nowrap shadow-2xl max-w-xs backdrop-blur-xl">
+          <div className="relative z-10">{text}</div>
+          <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-slate-900"></div>
+          <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/10 to-blue-500/10 rounded-lg"></div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Confetti Component
+const Confetti = ({ onComplete }) => {
+  useEffect(() => {
+    const timer = setTimeout(onComplete, 3000);
+    return () => clearTimeout(timer);
+  }, [onComplete]);
+
+  const particles = Array.from({ length: 50 }, (_, i) => ({
+    id: i,
+    x: Math.random() * 100,
+    delay: Math.random() * 0.5,
+    duration: 2 + Math.random() * 1,
+    color: ['#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899', '#10b981'][Math.floor(Math.random() * 5)]
+  }));
+
+  return (
+    <div className="fixed inset-0 pointer-events-none z-50">
+      {particles.map(p => (
+        <div
+          key={p.id}
+          className="absolute w-2 h-2 rounded-full"
+          style={{
+            left: `${p.x}%`,
+            top: '-10px',
+            backgroundColor: p.color,
+            animation: `confettiFall ${p.duration}s ease-out ${p.delay}s forwards`,
+            boxShadow: `0 0 10px ${p.color}`
+          }}
+        />
+      ))}
+      <style>{`
+        @keyframes confettiFall {
+          to {
+            transform: translateY(100vh) rotate(720deg);
+            opacity: 0;
+          }
+        }
+      `}</style>
+    </div>
+  );
+};
+
+// Simulation Graph Component
+const SimulationGraph = ({ 
+  opportunity, 
+  capital, 
+  perpAllocation, 
+  perpDirection,
+  perpLeverage,
+  betAllocations, 
+  onAllocationChange,
+  onOptimize 
+}) => {
+  const [hoveredPoint, setHoveredPoint] = useState(null);
+  const [optimizeMetric, setOptimizeMetric] = useState('balanced');
+  const [zoomLevel, setZoomLevel] = useState(1);
+  
+  const getPriceRange = () => {
+    if (zoomLevel === 1) return [-30, 30];
+    if (zoomLevel === 2) return [-60, 60];
+    return [-100, 100];
+  };
+  
+  const simulateStrategy = () => {
+    const [minPrice, maxPrice] = getPriceRange();
+    const points = [];
+    const steps = 61;
+    
+    for (let i = 0; i < steps; i++) {
+      const priceChange = minPrice + (i / (steps - 1)) * (maxPrice - minPrice);
+      
+      // Calculate perp P&L
+      const perpCapital = capital * (perpAllocation / 100);
+      const direction = perpDirection === 'long' ? 1 : -1;
+      const perpPL = perpCapital * (priceChange / 100) * direction * perpLeverage;
+      
+      // Calculate bet P&L
+      let betPL = 0;
+      betAllocations.forEach(bet => {
+        const betCapital = capital * (bet.allocation / 100);
+        const noPrice = parseFloat(bet.market.outcomePrices[1]);
+        const yesPrice = parseFloat(bet.market.outcomePrices[0]);
+        
+        if (bet.betOn === 'NO') {
+          betPL += priceChange < 10 ? (betCapital / noPrice - betCapital) : -betCapital;
+        } else {
+          betPL += priceChange > 10 ? (betCapital / yesPrice - betCapital) : -betCapital;
+        }
+      });
+      
+      points.push({
+        priceChange,
+        perpPL,
+        betPL,
+        totalPL: perpPL + betPL
+      });
+    }
+    
+    return points;
+  };
+  
+  const data = simulateStrategy();
+  const maxPL = Math.max(...data.map(d => Math.abs(d.totalPL)));
+  
+  const handleOptimize = () => {
+    if (betAllocations.length === 0) return;
+    
+    const strategies = [
+      { perp: 50, bets: 50 },
+      { perp: 40, bets: 60 },
+      { perp: 60, bets: 40 }
+    ];
+    
+    let bestStrategy = null;
+    let bestScore = -Infinity;
+    
+    strategies.forEach(strat => {
+      const testAlloc = {
+        perpAllocation: strat.perp,
+        perpDirection,
+        perpLeverage,
+        betAllocations: betAllocations.map(bet => ({
+          ...bet,
+          allocation: Math.floor(strat.bets / betAllocations.length)
+        }))
+      };
+      
+      // Simple scoring based on average P&L
+      let score = 0;
+      for (let pc = -20; pc <= 20; pc += 5) {
+        const perpPL = capital * (strat.perp / 100) * (pc / 100) * (perpDirection === 'long' ? 1 : -1) * perpLeverage;
+        let betPL = 0;
+        betAllocations.forEach(bet => {
+          const betCap = capital * (strat.bets / betAllocations.length / 100);
+          const noPrice = parseFloat(bet.market.outcomePrices[1]);
+          betPL += pc < 10 ? (betCap / noPrice - betCap) : -betCap;
+        });
+        score += Math.abs(perpPL + betPL); // Minimize absolute P&L variance
+      }
+      
+      if (score < bestScore || bestScore === -Infinity) {
+        bestScore = score;
+        bestStrategy = testAlloc;
+      }
+    });
+    
+    if (bestStrategy) {
+      onOptimize(bestStrategy);
+    }
+  };
+  
+  return (
+    <div className="glass rounded-lg p-3">
+      <div className="flex items-center justify-between mb-2">
+        <Tooltip text="P&L simulation across price movements">
+          <div className="flex items-center gap-2">
+            <LineChart className="text-cyan-400" size={14} />
+            <h4 className="text-[10px] font-bold text-cyan-400">P&L SIMULATION</h4>
+          </div>
+        </Tooltip>
+        
+        <div className="flex items-center gap-2">
+          {/* Zoom */}
+          <div className="flex gap-1">
+            {[1, 2, 3].map(level => (
+              <button
+                key={level}
+                onClick={() => setZoomLevel(level)}
+                className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${
+                  zoomLevel === level ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-500'
+                }`}
+              >
+                {level === 1 ? '±30%' : level === 2 ? '±60%' : 'FULL'}
+              </button>
+            ))}
+          </div>
+          
+          {/* Optimize */}
+          <select
+            value={optimizeMetric}
+            onChange={(e) => setOptimizeMetric(e.target.value)}
+            className="bg-slate-900 border border-purple-500/30 rounded px-2 py-1 text-[9px] text-purple-400 font-bold"
+          >
+            <option value="balanced">Balanced</option>
+            <option value="maxProfit">Max Profit</option>
+            <option value="minLoss">Min Loss</option>
+          </select>
+          
+          <button
+            onClick={handleOptimize}
+            disabled={betAllocations.length === 0}
+            className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-30 text-white px-2 py-1 rounded text-[9px] font-bold transition-all flex items-center gap-1"
+          >
+            <Zap size={10} />
+            OPTIMIZE
+          </button>
+        </div>
+      </div>
+      
+      {/* Chart */}
+      <div className="relative h-32 bg-slate-950 rounded-lg p-2">
+        <div className="absolute left-0 top-0 bottom-0 flex flex-col justify-between text-[8px] text-slate-500 pr-1">
+          <span>${maxPL.toFixed(0)}</span>
+          <span>$0</span>
+          <span>-${maxPL.toFixed(0)}</span>
+        </div>
+        
+        <div className="ml-8 h-full relative">
+          <div className="absolute left-0 right-0 top-1/2 border-t border-slate-700 border-dashed"></div>
+          
+          <svg className="w-full h-full relative" viewBox="0 0 100 100" preserveAspectRatio="none">
+            <polyline
+              points={data.map((d, i) => {
+                const x = (i / (data.length - 1)) * 100;
+                const y = 50 - (d.totalPL / maxPL) * 45;
+                return `${x},${y}`;
+              }).join(' ')}
+              fill="none"
+              stroke="#06b6d4"
+              strokeWidth="0.8"
+              vectorEffect="non-scaling-stroke"
+            />
+            
+            <path
+              d={`M 0,50 ${data.map((d, i) => {
+                const x = (i / (data.length - 1)) * 100;
+                const y = 50 - (d.totalPL / maxPL) * 45;
+                return `L ${x},${y}`;
+              }).join(' ')} L 100,50 Z`}
+              fill={data[Math.floor(data.length / 2)].totalPL >= 0 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'}
+            />
+            
+            {data.map((d, i) => {
+              if (i % 6 !== 0) return null;
+              const x = (i / (data.length - 1)) * 100;
+              const y = 50 - (d.totalPL / maxPL) * 45;
+              
+              return (
+                <circle
+                  key={i}
+                  cx={x}
+                  cy={y}
+                  r={hoveredPoint === i ? "1.5" : "0.8"}
+                  fill={d.totalPL >= 0 ? "#10b981" : "#ef4444"}
+                  onMouseEnter={() => setHoveredPoint(i)}
+                  onMouseLeave={() => setHoveredPoint(null)}
+                  className="cursor-pointer"
+                />
+              );
+            })}
+          </svg>
+          
+          {hoveredPoint !== null && (
+            <div className="absolute top-0 left-1/2 -translate-x-1/2 bg-gradient-to-br from-slate-900 to-slate-800 border border-cyan-500/50 rounded-lg px-3 py-1 text-[9px] pointer-events-none z-10 shadow-2xl">
+              <div className="text-slate-400">Change: <span className="text-white font-bold">{data[hoveredPoint].priceChange.toFixed(1)}%</span></div>
+              <div className="text-slate-400">P&L: <span className={`font-bold ${data[hoveredPoint].totalPL >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                ${data[hoveredPoint].totalPL.toFixed(0)}
+              </span></div>
+              <div className="text-[8px] text-slate-500">
+                Perp: ${data[hoveredPoint].perpPL.toFixed(0)} | Bets: ${data[hoveredPoint].betPL.toFixed(0)}
+              </div>
+            </div>
+          )}
+        </div>
+        
+        <div className="ml-8 flex justify-between text-[8px] text-slate-500 mt-1">
+          <span>{getPriceRange()[0]}%</span>
+          <span>0%</span>
+          <span>+{getPriceRange()[1]}%</span>
+        </div>
+      </div>
+      
+      {/* Allocation Controls */}
+      <div className="mt-3 space-y-2">
+        {/* Perp Allocation */}
+        <div className="glass-cyan rounded p-2">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[8px] text-cyan-400 font-bold">PERP ALLOCATION</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-cyan-400">{perpAllocation}%</span>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => onAllocationChange('perpDirection', perpDirection === 'long' ? 'short' : 'long')}
+                  className={`px-2 py-0.5 rounded text-[8px] font-bold ${
+                    perpDirection === 'long' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-500'
+                  }`}
+                >
+                  LONG
+                </button>
+                <button
+                  onClick={() => onAllocationChange('perpDirection', perpDirection === 'short' ? 'long' : 'short')}
+                  className={`px-2 py-0.5 rounded text-[8px] font-bold ${
+                    perpDirection === 'short' ? 'bg-red-500/20 text-red-400' : 'bg-slate-800 text-slate-500'
+                  }`}
+                >
+                  SHORT
+                </button>
+              </div>
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-[8px] text-slate-400">Leverage:</span>
+            <div className="flex gap-1">
+              {[1, 2, 5, 10, 20].map(lev => (
+                <button
+                  key={lev}
+                  onClick={() => onAllocationChange('perpLeverage', lev)}
+                  className={`px-2 py-0.5 rounded text-[8px] font-bold ${
+                    perpLeverage === lev ? 'bg-cyan-500/20 text-cyan-400' : 'bg-slate-800 text-slate-500'
+                  }`}
+                >
+                  {lev}x
+                </button>
+              ))}
+            </div>
+          </div>
+          
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="5"
+            value={perpAllocation}
+            onChange={(e) => onAllocationChange('perp', parseInt(e.target.value))}
+            className="w-full h-1 bg-slate-900 rounded-lg cursor-pointer"
+          />
+          <div className="text-xs text-slate-400 mt-1">${(capital * perpAllocation / 100).toFixed(0)}</div>
+        </div>
+        
+        {/* Bet Allocations */}
+        {betAllocations.map((bet, idx) => (
+          <div key={idx} className="glass-cyan rounded p-2">
+            <div className="flex items-center justify-between mb-2">
+              <Tooltip text={bet.market.question}>
+                <span className="text-[8px] text-blue-400 font-bold truncate max-w-[50%]">
+                  {bet.market.question.substring(0, 25)}...
+                </span>
+              </Tooltip>
+              <div className="flex items-center gap-2">
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => onAllocationChange('betType', idx, 'YES')}
+                    className={`px-2 py-0.5 rounded text-[8px] font-bold ${
+                      bet.betOn === 'YES' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-500'
+                    }`}
+                  >
+                    YES
+                  </button>
+                  <button
+                    onClick={() => onAllocationChange('betType', idx, 'NO')}
+                    className={`px-2 py-0.5 rounded text-[8px] font-bold ${
+                      bet.betOn === 'NO' ? 'bg-red-500/20 text-red-400' : 'bg-slate-800 text-slate-500'
+                    }`}
+                  >
+                    NO
+                  </button>
+                </div>
+                <span className="text-xs font-bold text-blue-400">{bet.allocation}%</span>
+                <button
+                  onClick={() => onAllocationChange('removeBet', idx)}
+                  className="text-red-400 hover:text-red-300 text-[10px] font-bold"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+            
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="5"
+              value={bet.allocation}
+              onChange={(e) => onAllocationChange('bet', idx, parseInt(e.target.value))}
+              className="w-full h-1 bg-slate-900 rounded-lg cursor-pointer"
+            />
+            <div className="text-xs text-slate-400 mt-1">${(capital * bet.allocation / 100).toFixed(0)}</div>
+          </div>
+        ))}
+      </div>
+      
+      {/* Validation */}
+      {(perpAllocation + betAllocations.reduce((sum, b) => sum + b.allocation, 0)) !== 100 && (
+        <div className="mt-2 text-[9px] text-yellow-400 bg-yellow-500/10 rounded p-2">
+          ⚠️ Allocations must sum to 100%
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Main Component
+const HedgeFinder = () => {
+  const [hyperliquidMarkets, setHyperliquidMarkets] = useState([]);
+  const [polymarketMarkets, setPolymarketMarkets] = useState([]);
+  const [opportunities, setOpportunities] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('All');
+  const [minHedgeScore, setMinHedgeScore] = useState(60);
+  const [error, setError] = useState('');
+  const [capital, setCapital] = useState(1000);
+  const [allocations, setAllocations] = useState({});
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [lastSearchTime, setLastSearchTime] = useState(0);
+  
+  const API_BASE_URL = 'https://hedge-deal-trader-production.up.railway.app';
+  
+  const fetchHyperliquidData = async () => {
+    try {
+      console.log('Fetching from:', `${API_BASE_URL}/api/hyperliquid/meta`);
+      const response = await fetch(`${API_BASE_URL}/api/hyperliquid/meta`);
+      console.log('Response status:', response.status);
+      console.log('Response headers:', response.headers);
+      const data = await response.json();
+      console.log('Data received:', data);
+      
+      // API returns [metadata, assetContexts] array
+      const universe = data[0]?.universe || [];
+      const assetContexts = data[1] || [];
+      
+      // Transform API response to match our format
+      const markets = universe.map((asset, idx) => ({
+        symbol: asset.name,
+        price: parseFloat(assetContexts[idx]?.markPx || 0),
+        funding: parseFloat(assetContexts[idx]?.funding || 0),
+        openInterest: parseFloat(assetContexts[idx]?.openInterest || 0),
+        volume24h: parseFloat(assetContexts[idx]?.dayNtlVlm || 0),
+        change24h: parseFloat(assetContexts[idx]?.prevDayPx || 0),
+        maxLeverage: asset.maxLeverage || 20
+      })).filter(m => m.price > 0);
+      
+      return markets;
+    } catch (error) {
+      console.error('Hyperliquid API error:', error);
+      throw error; // Throw so handleSearch can detect failure
+    }
+  };
+
+  const fetchPolymarketData = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/polymarket/markets?active=true&limit=100`);
+      const data = await response.json();
+      
+      // Transform API response
+      const markets = data.map(market => ({
+        id: market.id || market.condition_id,
+        question: market.question || market.title,
+        slug: market.slug || market.id,
+        outcomes: market.outcomes || ['Yes', 'No'],
+        outcomePrices: market.outcomePrices || ['0.5', '0.5'],
+        volume: parseFloat(market.volume || 0),
+        liquidity: parseFloat(market.liquidity || 0)
+      }));
+      
+      return markets;
+    } catch (error) {
+      console.error('Polymarket API error:', error);
+      throw error; // Throw so handleSearch can detect failure
+    }
+  };
+  
+  const getMockHyperliquidData = () => [
+    { symbol: 'BTC', price: 42350.50, funding: 0.0002, openInterest: 500000000, volume24h: 2500000000, change24h: 1.8, maxLeverage: 50 },
+    { symbol: 'ETH', price: 2250.75, funding: 0.00015, openInterest: 200000000, volume24h: 800000000, change24h: -0.5, maxLeverage: 50 },
+    { symbol: 'SOL', price: 98.25, funding: 0.0003, openInterest: 50000000, volume24h: 150000000, change24h: 3.2, maxLeverage: 20 },
+    { symbol: 'DOGE', price: 0.08, funding: 0.0002, openInterest: 30000000, volume24h: 100000000, change24h: -1.2, maxLeverage: 20 },
+    { symbol: 'LINK', price: 15.75, funding: 0.0001, openInterest: 25000000, volume24h: 60000000, change24h: 0.8, maxLeverage: 20 },
+  ];
+
+  const getMockPolymarketData = () => [
+    { id: '1', question: 'Will Bitcoin price be above $50,000 on March 1, 2026?', slug: 'bitcoin-50k', outcomes: ['Yes', 'No'], outcomePrices: ['0.72', '0.28'], volume: 850000, liquidity: 250000 },
+    { id: '2', question: 'Will Ethereum reach $3,000 by June 2026?', slug: 'eth-3000', outcomes: ['Yes', 'No'], outcomePrices: ['0.58', '0.42'], volume: 620000, liquidity: 180000 },
+    { id: '3', question: 'Will Solana price be above $150 by July 2026?', slug: 'sol-150', outcomes: ['Yes', 'No'], outcomePrices: ['0.48', '0.52'], volume: 390000, liquidity: 120000 },
+    { id: '4', question: 'Will Dogecoin reach $0.15 by September 2026?', slug: 'doge-015', outcomes: ['Yes', 'No'], outcomePrices: ['0.38', '0.62'], volume: 285000, liquidity: 95000 },
+    { id: '5', question: 'Will Chainlink price be above $25 by Q3 2026?', slug: 'link-25', outcomes: ['Yes', 'No'], outcomePrices: ['0.44', '0.56'], volume: 275000, liquidity: 88000 },
+  ];
+  
+  const calculateCorrelation = (hlMarket, pmMarket) => {
+    const hlSymbol = hlMarket.symbol.toLowerCase();
+    const pmQuestion = pmMarket.question.toLowerCase();
+    
+    let score = 0;
+    let isNegative = false;
+    
+    // Direct match
+    if (pmQuestion.includes(hlSymbol)) score += 30;
+    
+    // Keyword matching
+    const nameMap = {
+      'BTC': ['bitcoin', 'btc'],
+      'ETH': ['ethereum', 'ether', 'eth'],
+      'SOL': ['solana', 'sol'],
+      'DOGE': ['dogecoin', 'doge'],
+      'LINK': ['chainlink', 'link'],
+    };
+    
+    const keywords = nameMap[hlSymbol.toUpperCase()] || [];
+    keywords.forEach(kw => {
+      if (pmQuestion.includes(kw)) score += 15;
+    });
+    
+    // Price context
+    if (pmQuestion.match(/price|exceed|above|reach/i)) score += 15;
+    if (pmMarket.liquidity > 100000) score += 8;
+    
+    // Negative correlation
+    if (pmQuestion.match(/below|under|won't|not exceed/i)) isNegative = true;
+    
+    // Add noise for realism
+    score += (Math.random() - 0.5) * 10;
+    score = Math.min(Math.max(score, 0), 85);
+    
+    return isNegative ? -score : score;
+  };
+  
+  const findRelatedBets = (opportunity) => {
+    return polymarketMarkets
+      .map(pm => ({
+        market: pm,
+        correlation: calculateCorrelation(opportunity.hyperliquid, pm)
+      }))
+      .filter(b => Math.abs(b.correlation) >= minHedgeScore * 0.4)
+      .sort((a, b) => Math.abs(b.correlation) - Math.abs(a.correlation));
+  };
+  
+  const handleAllocationChange = (oppKey, type, indexOrValue, value) => {
+    setAllocations(prev => {
+      const current = prev[oppKey] || {
+        perpAllocation: 50,
+        perpDirection: 'long',
+        perpLeverage: 1,
+        betAllocations: []
+      };
+      
+      const updated = { ...current };
+      
+      if (type === 'perp') {
+        const diff = indexOrValue - updated.perpAllocation;
+        updated.perpAllocation = indexOrValue;
+        
+        if (updated.betAllocations.length > 0) {
+          const totalBet = updated.betAllocations.reduce((sum, b) => sum + b.allocation, 0);
+          updated.betAllocations = updated.betAllocations.map(bet => {
+            const proportion = totalBet > 0 ? bet.allocation / totalBet : 1 / updated.betAllocations.length;
+            return { ...bet, allocation: Math.max(0, Math.round(bet.allocation - (diff * proportion))) };
+          });
+        }
+      } else if (type === 'bet') {
+        const diff = value - updated.betAllocations[indexOrValue].allocation;
+        updated.betAllocations[indexOrValue].allocation = value;
+        
+        const others = updated.betAllocations.filter((_, i) => i !== indexOrValue);
+        const totalOther = others.reduce((sum, b) => sum + b.allocation, 0);
+        
+        if (totalOther > 0) {
+          updated.betAllocations = updated.betAllocations.map((bet, i) => {
+            if (i === indexOrValue) return bet;
+            const proportion = bet.allocation / totalOther;
+            return { ...bet, allocation: Math.max(0, Math.round(bet.allocation - (diff * proportion))) };
+          });
+        } else {
+          updated.perpAllocation = Math.max(0, updated.perpAllocation - diff);
+        }
+      } else if (type === 'betType') {
+        updated.betAllocations[indexOrValue].betOn = value;
+      } else if (type === 'removeBet') {
+        const removed = updated.betAllocations[indexOrValue].allocation;
+        updated.betAllocations = updated.betAllocations.filter((_, i) => i !== indexOrValue);
+        updated.perpAllocation += removed;
+      } else if (type === 'addBet') {
+        const newAlloc = 10;
+        updated.perpAllocation = Math.max(0, updated.perpAllocation - newAlloc);
+        updated.betAllocations.push({ ...indexOrValue, allocation: newAlloc });
+      } else if (type === 'perpDirection') {
+        updated.perpDirection = indexOrValue;
+      } else if (type === 'perpLeverage') {
+        updated.perpLeverage = indexOrValue;
+      } else if (type === 'optimize') {
+        return { ...prev, [oppKey]: indexOrValue };
+      }
+      
+      // Normalize to 100%
+      const total = updated.perpAllocation + updated.betAllocations.reduce((sum, b) => sum + b.allocation, 0);
+      if (total !== 100 && total > 0) {
+        updated.perpAllocation += (100 - total);
+        updated.perpAllocation = Math.max(0, Math.min(100, updated.perpAllocation));
+      }
+      
+      return { ...prev, [oppKey]: updated };
+    });
+  };
+  
+  const handleSearch = async () => {
+    setLoading(true);
+    setError('');
+    setShowConfetti(false);
+    
+    try {
+      // Fetch real data from your backend
+      const [hlMarkets, pmMarkets] = await Promise.all([
+        fetchHyperliquidData(),
+        fetchPolymarketData()
+      ]);
+      
+      setHyperliquidMarkets(hlMarkets);
+      setPolymarketMarkets(pmMarkets);
+      
+      // Success! Show green message
+      setError('✅ Connected to live data from Hyperliquid & Polymarket!');
+      
+      const matches = [];
+      hlMarkets.forEach(hl => {
+        pmMarkets.forEach(pm => {
+          const corr = calculateCorrelation(hl, pm);
+          const absCorr = Math.abs(corr);
+          
+          if (absCorr >= minHedgeScore) {
+            matches.push({
+              hyperliquid: hl,
+              polymarket: pm,
+              hedgeScore: absCorr,
+              correlation: corr,
+              isNegative: corr < 0
+            });
+          }
+        });
+      });
+      
+      matches.sort((a, b) => b.hedgeScore - a.hedgeScore);
+      setOpportunities(matches);
+      
+      if (matches.length > 0 && (Date.now() - lastSearchTime > 1000)) {
+        setShowConfetti(true);
+      }
+      
+      setLastSearchTime(Date.now());
+    } catch (err) {
+      // API failed, use mock data
+      const hlMarkets = getMockHyperliquidData();
+      const pmMarkets = getMockPolymarketData();
+      
+      setHyperliquidMarkets(hlMarkets);
+      setPolymarketMarkets(pmMarkets);
+      
+      const matches = [];
+      hlMarkets.forEach(hl => {
+        pmMarkets.forEach(pm => {
+          const corr = calculateCorrelation(hl, pm);
+          const absCorr = Math.abs(corr);
+          
+          if (absCorr >= minHedgeScore) {
+            matches.push({
+              hyperliquid: hl,
+              polymarket: pm,
+              hedgeScore: absCorr,
+              correlation: corr,
+              isNegative: corr < 0
+            });
+          }
+        });
+      });
+      
+      matches.sort((a, b) => b.hedgeScore - a.hedgeScore);
+      setOpportunities(matches);
+      
+      setError('⚠️ Using fallback data - check if backend is running at ' + API_BASE_URL);
+      console.error('Search error:', err);
+    }
+    
+    setLoading(false);
+  };
+  
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter') handleSearch();
+  };
+  
+  const filteredOpportunities = opportunities.filter(opp => {
+    if (!searchTerm || searchTerm.toLowerCase() === 'all') return true;
+    const search = searchTerm.toLowerCase();
+    return opp.hyperliquid.symbol.toLowerCase().includes(search) ||
+           opp.polymarket.question.toLowerCase().includes(search);
+  });
+  
+  const getOpportunityKey = (opp) => `${opp.hyperliquid.symbol}-${opp.polymarket.id}`;
+  
+  const getOpportunityAllocations = (opp) => {
+    const key = getOpportunityKey(opp);
+    return allocations[key] || {
+      perpAllocation: 50,
+      perpDirection: 'long',
+      perpLeverage: 1,
+      betAllocations: [{
+        market: opp.polymarket,
+        allocation: 50,
+        betOn: 'NO',
+        threshold: 10
+      }]
+    };
+  };
+  
+  return (
+    <div className="min-h-screen bg-black text-white">
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Exo+2:wght@600;800&display=swap');
+        
+        * { font-family: 'JetBrains Mono', monospace; }
+        .font-display { font-family: 'Exo 2', sans-serif; }
+        
+        .glass {
+          background: rgba(15, 23, 42, 0.6);
+          backdrop-filter: blur(12px);
+          border: 1px solid rgba(71, 85, 105, 0.3);
+        }
+        
+        .glass-cyan {
+          background: rgba(6, 182, 212, 0.05);
+          backdrop-filter: blur(12px);
+          border: 1px solid rgba(6, 182, 212, 0.2);
+        }
+        
+        input[type="range"]::-webkit-slider-thumb {
+          appearance: none;
+          width: 16px;
+          height: 16px;
+          border-radius: 50%;
+          background: linear-gradient(135deg, #06b6d4, #3b82f6);
+          cursor: pointer;
+          box-shadow: 0 0 10px rgba(6, 182, 212, 0.5);
+        }
+        
+        .opportunity-card {
+          transition: all 0.3s ease;
+        }
+        
+        .opportunity-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 30px rgba(6, 182, 212, 0.15);
+        }
+
+        .scan-button {
+          background: linear-gradient(145deg, #0ea5e9, #3b82f6, #0ea5e9);
+          background-size: 200% 200%;
+          position: relative;
+          overflow: hidden;
+          box-shadow: 
+            0 4px 15px rgba(14, 165, 233, 0.4),
+            inset 0 1px 0 rgba(255, 255, 255, 0.3),
+            inset 0 -1px 0 rgba(0, 0, 0, 0.3);
+          border: 1px solid rgba(59, 130, 246, 0.5);
+          animation: metalShift 3s ease infinite;
+        }
+
+        .scan-button::before {
+          content: '';
+          position: absolute;
+          top: -50%;
+          left: -50%;
+          width: 200%;
+          height: 200%;
+          background: linear-gradient(45deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+          transform: rotate(45deg);
+          animation: shine 3s infinite;
+        }
+
+        .scan-button:hover {
+          box-shadow: 
+            0 6px 25px rgba(14, 165, 233, 0.6),
+            inset 0 1px 0 rgba(255, 255, 255, 0.4),
+            inset 0 -1px 0 rgba(0, 0, 0, 0.4);
+          transform: translateY(-2px);
+        }
+
+        .scan-button:active {
+          transform: translateY(0px);
+          box-shadow: 
+            0 2px 10px rgba(14, 165, 233, 0.5),
+            inset 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        @keyframes metalShift {
+          0%, 100% { background-position: 0% 50%; }
+          50% { background-position: 100% 50%; }
+        }
+
+        @keyframes shine {
+          0% { left: -50%; }
+          100% { left: 150%; }
+        }
+
+        .avatar-bounce {
+          animation: bounceIn 0.8s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards;
+          transform: scale(0);
+        }
+
+        @keyframes bounceIn {
+          0% {
+            transform: scale(0) rotate(-180deg);
+            opacity: 0;
+          }
+          50% {
+            transform: scale(1.2) rotate(10deg);
+          }
+          70% {
+            transform: scale(0.9) rotate(-5deg);
+          }
+          100% {
+            transform: scale(1) rotate(0deg);
+            opacity: 1;
+          }
+        }
+      `}</style>
+
+      {showConfetti && <Confetti onComplete={() => setShowConfetti(false)} />}
+
+      <div className="bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 min-h-screen">
+        {/* Header */}
+        <div className="border-b border-cyan-900/30 bg-slate-950/80 backdrop-blur-xl sticky top-0 z-40">
+          <div className="max-w-[1800px] mx-auto px-6 py-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-lg overflow-hidden border-2 border-cyan-500/30 bg-gradient-to-br from-cyan-500 via-blue-600 to-purple-600 flex items-center justify-center avatar-bounce">
+                  <span className="text-3xl">🌿</span>
+                </div>
+                <div>
+                  <h1 className="font-display text-2xl font-black bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600">
+                    DeFiDummy's Hedge Deal Finder
+                  </h1>
+                  <p className="text-cyan-400 text-[10px] tracking-wider">
+                    Find asymmetric bets that print when markets dump 📉 Built different for degens who hedge 💎🙌
+                  </p>
+                </div>
+              </div>
+              
+              <div className="glass rounded-lg px-4 py-2">
+                <div className="text-[10px] text-slate-400 mb-1">QUICK START:</div>
+                <div className="text-[9px] text-cyan-400 space-y-0.5">
+                  <div>1. Enter ticker (BTC, ETH, etc.) 🔍</div>
+                  <div>2. Scan for alpha plays 🚀</div>
+                  <div>3. Pick your poison (long/short) ⚔️</div>
+                  <div>4. Let optimizer cook 🧑‍🍳</div>
+                  <div>5. Ape in responsibly 🦍</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Main Content */}
+        <div className="max-w-[1800px] mx-auto px-6 py-4">
+          {/* Stats */}
+          <div className="grid grid-cols-4 gap-3 mb-4">
+            <div className="glass rounded-lg p-2.5">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-cyan-400 text-[10px] font-bold">HYPERLIQUID MARKETS</span>
+                <BarChart3 className="text-cyan-400" size={12} />
+              </div>
+              <div className="text-xl font-display font-black text-white">{hyperliquidMarkets.length}</div>
+            </div>
+            
+            <div className="glass rounded-lg p-2.5">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-blue-400 text-[10px] font-bold">POLYMARKET PREDICTIONS</span>
+                <Target className="text-blue-400" size={12} />
+              </div>
+              <div className="text-xl font-display font-black text-white">{polymarketMarkets.length}</div>
+            </div>
+            
+            <div className="glass rounded-lg p-2.5">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-emerald-400 text-[10px] font-bold">INVESTMENT OPPORTUNITIES</span>
+                <Zap className="text-emerald-400" size={12} />
+              </div>
+              <div className="text-xl font-display font-black text-white">{filteredOpportunities.length}</div>
+            </div>
+            
+            <div className="glass rounded-lg p-2.5">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-purple-400 text-[10px] font-bold">CORRELATION THRESHOLD</span>
+                <Activity className="text-purple-400" size={12} />
+              </div>
+              <div className="text-xl font-display font-black text-white">{minHedgeScore}%</div>
+            </div>
+          </div>
+
+          {/* Controls */}
+          <div className="grid grid-cols-4 gap-3 mb-4">
+            <div className="glass rounded-lg p-3">
+              <label className="block text-cyan-400 text-[10px] font-bold mb-2">SEARCH</label>
+              <div className="relative">
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  placeholder="All, BTC, ETH..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded pl-7 pr-2 py-1.5 text-white text-xs placeholder-slate-600 focus:border-cyan-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="glass rounded-lg p-3">
+              <label className="block text-cyan-400 text-[10px] font-bold mb-2">INVESTMENT AMOUNT</label>
+              <div className="relative">
+                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500 text-xs">$</span>
+                <input
+                  type="number"
+                  value={capital}
+                  onChange={(e) => setCapital(parseFloat(e.target.value) || 0)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded pl-5 pr-2 py-1.5 text-white text-xs focus:border-cyan-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="glass rounded-lg p-3">
+              <label className="block text-cyan-400 text-[10px] font-bold mb-2">
+                CORRELATION THRESHOLD: {minHedgeScore}%
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={minHedgeScore}
+                onChange={(e) => setMinHedgeScore(parseInt(e.target.value))}
+                className="w-full h-1.5 bg-slate-900 rounded-lg cursor-pointer"
+              />
+            </div>
+
+            <div className="glass rounded-lg p-3 flex items-end">
+              <button
+                onClick={handleSearch}
+                disabled={loading}
+                className="w-full scan-button text-white font-bold py-2 rounded-lg transition-all disabled:opacity-50 flex items-center justify-center gap-2 text-xs"
+              >
+                {loading ? (
+                  <>
+                    <RefreshCw className="animate-spin" size={14} />
+                    SCANNING...
+                  </>
+                ) : (
+                  <>
+                    <Zap size={14} />
+                    SCAN NOW
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {error && (
+            <div className="glass-cyan rounded-lg p-2.5 mb-4 flex items-center gap-2">
+              <Activity className="text-cyan-400" size={14} />
+              <p className="text-cyan-300 text-xs">{error}</p>
+            </div>
+          )}
+
+          {/* Opportunities */}
+          <div className="space-y-3">
+            {filteredOpportunities.length === 0 && !loading && hyperliquidMarkets.length === 0 && (
+              <div className="glass rounded-lg p-10 text-center">
+                <Target className="mx-auto mb-3 text-cyan-400" size={32} />
+                <p className="text-cyan-300 font-bold mb-1">Ready to Find Alpha</p>
+                <p className="text-slate-500 text-xs">Hit that SCAN button and let's print some gainz 💰</p>
+              </div>
+            )}
+
+            {filteredOpportunities.map((opp, idx) => {
+              const oppKey = getOpportunityKey(opp);
+              const oppAllocations = getOpportunityAllocations(opp);
+              const relatedBets = findRelatedBets(opp);
+              
+              return (
+                <div key={idx} className="opportunity-card glass rounded-lg p-3">
+                  <div className="space-y-3">
+                    <div>
+                      {/* Badges */}
+                      <div className="flex flex-wrap gap-1.5 mb-3">
+                        <span className={`px-2 py-0.5 rounded text-[9px] font-black border ${
+                          opp.hedgeScore >= 80 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' :
+                          opp.hedgeScore >= 60 ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30' :
+                          'bg-purple-500/10 text-purple-400 border-purple-500/30'
+                        }`}>
+                          {opp.isNegative ? '-' : '+'}{opp.hedgeScore.toFixed(0)}% CORRELATION
+                        </span>
+                        
+                        {relatedBets.length > 1 && (
+                          <span className="px-2 py-0.5 rounded text-[9px] font-black bg-purple-500/10 text-purple-400 border border-purple-500/30">
+                            +{relatedBets.length} BETS
+                          </span>
+                        )}
+                      </div>
+                      
+                      <div className="grid md:grid-cols-2 gap-3">
+                        {/* Left: Markets */}
+                        <div className="space-y-3">
+                          {/* Hyperliquid */}
+                          <div className="border-l-2 border-cyan-500 pl-2 bg-cyan-500/5 py-1.5 rounded-r">
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <TrendingUp className="text-cyan-400" size={10} />
+                              <span className="text-cyan-400 font-bold text-[9px]">HYPERLIQUID PERP</span>
+                            </div>
+                            <div className="flex items-baseline gap-2 mb-1">
+                              <div className="text-base font-display font-black text-white">{opp.hyperliquid.symbol}</div>
+                              <div className={`text-[10px] font-bold ${opp.hyperliquid.change24h > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {opp.hyperliquid.change24h > 0 ? '+' : ''}{opp.hyperliquid.change24h.toFixed(1)}%
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 text-[9px]">
+                              <div>
+                                <div className="text-slate-500">Price</div>
+                                <div className="text-white font-bold">${opp.hyperliquid.price.toFixed(2)}</div>
+                              </div>
+                              <div>
+                                <div className="text-slate-500">24h Vol</div>
+                                <div className="text-white font-bold">${(opp.hyperliquid.volume24h / 1e6).toFixed(1)}M</div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Polymarket */}
+                          <div className="border-l-2 border-blue-500 pl-2 bg-blue-500/5 py-1.5 rounded-r">
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <DollarSign className="text-blue-400" size={10} />
+                              <span className="text-blue-400 font-bold text-[9px]">PRIMARY BET</span>
+                            </div>
+                            <div className="text-white text-xs mb-1 leading-tight">{opp.polymarket.question}</div>
+                            <div className="grid grid-cols-2 gap-2 text-[9px]">
+                              <div>
+                                <div className="text-slate-500">YES</div>
+                                <div className="text-white font-bold">${opp.polymarket.outcomePrices[0]}</div>
+                              </div>
+                              <div>
+                                <div className="text-slate-500">NO</div>
+                                <div className="text-white font-bold">${opp.polymarket.outcomePrices[1]}</div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Related Bets */}
+                          {relatedBets.length > 0 && (
+                            <div className="glass-cyan rounded p-2">
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-1.5">
+                                  <Target className="text-purple-400" size={10} />
+                                  <span className="text-purple-400 font-bold text-[9px]">RELATED BETS</span>
+                                </div>
+                                <span className="text-[7px] text-slate-500 font-bold">CORR</span>
+                              </div>
+                              
+                              <div className="space-y-1 max-h-32 overflow-y-auto">
+                                {relatedBets.map((bet, bidx) => {
+                                  const isAdded = oppAllocations.betAllocations.some(b => b.market.id === bet.market.id);
+                                  return (
+                                    <div key={bidx} className="text-[9px] text-slate-300 flex items-center justify-between gap-2">
+                                      <span className="flex-1 truncate">{bet.market.question.substring(0, 30)}...</span>
+                                      <span className={`text-[8px] font-bold ${bet.correlation >= 0 ? 'text-emerald-400' : 'text-red-400'} min-w-[35px] text-right`}>
+                                        {bet.correlation >= 0 ? '+' : ''}{bet.correlation.toFixed(0)}%
+                                      </span>
+                                      {isAdded ? (
+                                        <button
+                                          onClick={() => {
+                                            const betIndex = oppAllocations.betAllocations.findIndex(b => b.market.id === bet.market.id);
+                                            if (betIndex !== -1) {
+                                              handleAllocationChange(oppKey, 'removeBet', betIndex);
+                                            }
+                                          }}
+                                          className="text-red-400 hover:text-red-300 ml-2 font-bold text-[8px]"
+                                        >
+                                          Remove
+                                        </button>
+                                      ) : (
+                                        <button
+                                          onClick={() => handleAllocationChange(oppKey, 'addBet', {
+                                            market: bet.market,
+                                            allocation: 10,
+                                            betOn: 'NO',
+                                            threshold: 10
+                                          })}
+                                          className="text-purple-400 hover:text-purple-300 ml-2 font-bold text-[8px]"
+                                        >
+                                          +Add
+                                        </button>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Right: Simulation */}
+                        <div>
+                          <SimulationGraph 
+                            opportunity={opp} 
+                            capital={capital} 
+                            perpAllocation={oppAllocations.perpAllocation}
+                            perpDirection={oppAllocations.perpDirection}
+                            perpLeverage={oppAllocations.perpLeverage}
+                            betAllocations={oppAllocations.betAllocations}
+                            onAllocationChange={(type, indexOrValue, value) => 
+                              handleAllocationChange(oppKey, type, indexOrValue, value)
+                            }
+                            onOptimize={(optimized) => 
+                              handleAllocationChange(oppKey, 'optimize', optimized)
+                            }
+                          />
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="grid grid-cols-2 gap-2 mt-3">
+                        <a
+                          href={`https://app.hyperliquid.xyz/trade/${opp.hyperliquid.symbol}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="glass hover:bg-slate-800 text-cyan-400 font-bold py-1.5 rounded text-[10px] transition-all text-center flex items-center justify-center gap-1"
+                        >
+                          <ExternalLink size={10} />
+                          Trade on Hyperliquid
+                        </a>
+
+                        <a
+                          href={`https://polymarket.com/event/${opp.polymarket.slug}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="glass hover:bg-slate-800 text-blue-400 font-bold py-1.5 rounded text-[10px] transition-all text-center flex items-center justify-center gap-1"
+                        >
+                          <ExternalLink size={10} />
+                          Bet on Polymarket
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Component defined above
+    
+    // Render the app
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<HedgeFinder />);
+  </script>
+</body>
+</html>

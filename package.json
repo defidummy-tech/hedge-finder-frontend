@@ -1,0 +1,8 @@
+{
+  "name": "hedge-finder-frontend",
+  "version": "1.0.0",
+  "description": "Arbitrage Terminal - React Frontend",
+  "scripts": {
+    "build": "echo 'Static site - no build needed'"
+  }
+}
