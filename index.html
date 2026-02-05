@@ -476,6 +476,7 @@ const HedgeFinder = () => {
       const assetContexts = data[1] || [];
       
       // Transform API response to match our format
+      // Transform API response to match our format
       const markets = universe.map((asset, idx) => ({
         symbol: asset.name,
         price: parseFloat(assetContexts[idx]?.markPx || 0),
@@ -685,7 +686,7 @@ const HedgeFinder = () => {
       setPolymarketMarkets(pmMarkets);
       
       // Success! Show green message
-      setError('✅ Connected to live data from Hyperliquid & Polymarket!');
+      setError(`✅ Connected to live data! ${hlMarkets.length} crypto markets, ${pmMarkets.length} prediction markets`);
       
       const matches = [];
       hlMarkets.forEach(hl => {
@@ -706,7 +707,7 @@ const HedgeFinder = () => {
       });
       
       matches.sort((a, b) => b.hedgeScore - a.hedgeScore);
-      setOpportunities(matches);
+      setOpportunities(matches.slice(0, 10)); // TOP 10 ONLY
       
       if (matches.length > 0 && (Date.now() - lastSearchTime > 1000)) {
         setShowConfetti(true);
@@ -740,7 +741,7 @@ const HedgeFinder = () => {
       });
       
       matches.sort((a, b) => b.hedgeScore - a.hedgeScore);
-      setOpportunities(matches);
+      setOpportunities(matches.slice(0, 10)); // TOP 10 ONLY
       
       setError('⚠️ Using fallback data - check if backend is running at ' + API_BASE_URL);
       console.error('Search error:', err);
@@ -972,7 +973,7 @@ const HedgeFinder = () => {
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   onKeyPress={handleKeyPress}
-                  placeholder="All, BTC, ETH..."
+                  placeholder="Try: BTC, ETH, SOL, AVAX..."
                   className="w-full bg-slate-950 border border-slate-800 rounded pl-7 pr-2 py-1.5 text-white text-xs placeholder-slate-600 focus:border-cyan-500 focus:outline-none"
                 />
               </div>
