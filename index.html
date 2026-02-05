@@ -7,19 +7,17 @@
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/lucide-react@latest/dist/umd/lucide-react.js"></script>
 </head>
 <body style="margin: 0; padding: 0;">
   <div id="root"></div>
-  
   <script type="text/babel">
-    const { useState, useEffect } = React;
-    const { Search, TrendingUp, DollarSign, Activity, ExternalLink, RefreshCw, Zap, Target, BarChart3, LineChart, Info } = lucide;
-    
-    // IMPORTANT: Update API URL to Render!
-    const API_BASE_URL = 'https://hedge-deal-trader.onrender.com';
-    
+const { useState, useEffect } = React;
+const { Search, TrendingUp, DollarSign, Activity, ExternalLink, RefreshCw, Zap, Target, BarChart3, LineChart, Info } = lucide;
+
+const API_BASE_URL = 'https://hedge-deal-trader.onrender.com';
+
 
 // Tooltip Component
 const Tooltip = ({ text, children }) => {
@@ -490,20 +488,42 @@ const HedgeFinder = () => {
       const data = await response.json();
       
       // Transform API response
-      const markets = data.map(market => ({
-        id: market.id || market.condition_id,
-        question: market.question || market.title,
-        slug: market.slug || market.id,
-        outcomes: market.outcomes || ['Yes', 'No'],
-        outcomePrices: market.outcomePrices || ['0.5', '0.5'],
-        volume: parseFloat(market.volume || 0),
-        liquidity: parseFloat(market.liquidity || 0)
-      }));
+      const markets = data.map(market => {
+        let outcomes = ['Yes', 'No'];
+        let outcomePrices = ['0.5', '0.5'];
+        
+        try {
+          if (typeof market.outcomes === 'string') {
+            outcomes = JSON.parse(market.outcomes);
+          } else if (Array.isArray(market.outcomes)) {
+            outcomes = market.outcomes;
+          }
+          
+          if (typeof market.outcomePrices === 'string') {
+            outcomePrices = JSON.parse(market.outcomePrices);
+          } else if (Array.isArray(market.outcomePrices)) {
+            outcomePrices = market.outcomePrices;
+          }
+        } catch (e) {
+          console.error('Error parsing market:', e);
+        }
+        
+        return {
+          id: market.id || market.conditionId,
+          question: market.question || market.title,
+          slug: market.slug || market.id,
+          outcomes,
+          outcomePrices,
+          volume: parseFloat(market.volume || 0),
+          volume24hr: parseFloat(market.volume24hr || 0),
+          liquidity: parseFloat(market.liquidity || 0)
+        };
+      });
       
       return markets;
     } catch (error) {
       console.error('Polymarket API error:', error);
-      throw error; // Throw so handleSearch can detect failure
+      throw error;
     }
   };
   
@@ -1072,7 +1092,7 @@ const HedgeFinder = () => {
                               <span className="text-blue-400 font-bold text-[9px]">PRIMARY BET</span>
                             </div>
                             <div className="text-white text-xs mb-1 leading-tight">{opp.polymarket.question}</div>
-                            <div className="grid grid-cols-2 gap-2 text-[9px]">
+                            <div className="grid grid-cols-2 gap-2 text-[9px] mb-2">
                               <div>
                                 <div className="text-slate-500">YES</div>
                                 <div className="text-white font-bold">${opp.polymarket.outcomePrices[0]}</div>
@@ -1081,6 +1101,9 @@ const HedgeFinder = () => {
                                 <div className="text-slate-500">NO</div>
                                 <div className="text-white font-bold">${opp.polymarket.outcomePrices[1]}</div>
                               </div>
+                            </div>
+                            <div className="text-[9px] text-slate-400">
+                              24h Vol: ${(opp.polymarket.volume24hr || 0).toLocaleString('en-US', {maximumFractionDigits: 0})}
                             </div>
                           </div>
 
@@ -1190,11 +1213,8 @@ const HedgeFinder = () => {
   );
 };
 
-// Component defined above
-    
-    // Render the app
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<HedgeFinder />);
+
+ReactDOM.createRoot(document.getElementById('root')).render(<HedgeFinder />);
   </script>
 </body>
 </html>
