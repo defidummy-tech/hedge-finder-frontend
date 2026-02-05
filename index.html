@@ -949,7 +949,9 @@ const HedgeFinder = () => {
                 <span className="text-blue-400 text-[10px] font-bold">POLYMARKET PREDICTIONS</span>
                 <Target className="text-blue-400" size={12} />
               </div>
-              <div className="text-xl font-display font-black text-white">{polymarketMarkets.length}</div>
+              <div className="text-xl font-display font-black text-white">
+                {new Set(filteredOpportunities.map(o => o.polymarket.id)).size}
+              </div>
             </div>
             
             <div className="glass rounded-lg p-2.5">
