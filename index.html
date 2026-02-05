@@ -699,8 +699,8 @@ const HedgeFinder = () => {
           const corr = calculateCorrelation(hl, pm);
           const absCorr = Math.abs(corr);
           
-          // Lower threshold to 10% to show more opportunities  
-          if (absCorr >= 10) {
+          // FIXED: Use minHedgeScore slider value instead of hardcoded 10
+          if (absCorr >= minHedgeScore) {
             matches.push({
               hyperliquid: hl,
               polymarket: pm,
@@ -713,7 +713,9 @@ const HedgeFinder = () => {
       });
       
       matches.sort((a, b) => b.hedgeScore - a.hedgeScore);
-      setOpportunities(matches.slice(0, 10)); // TOP 10 ONLY
+      
+      // FIXED: Show top 50 instead of hardcoded 10
+      setOpportunities(matches.slice(0, 50));
       
       if (matches.length > 0 && (Date.now() - lastSearchTime > 1000)) {
         setShowConfetti(true);
@@ -734,8 +736,8 @@ const HedgeFinder = () => {
           const corr = calculateCorrelation(hl, pm);
           const absCorr = Math.abs(corr);
           
-          // Lower threshold to 10%
-          if (absCorr >= 10) {
+          // FIXED: Use minHedgeScore slider value instead of hardcoded 10
+          if (absCorr >= minHedgeScore) {
             matches.push({
               hyperliquid: hl,
               polymarket: pm,
@@ -748,7 +750,9 @@ const HedgeFinder = () => {
       });
       
       matches.sort((a, b) => b.hedgeScore - a.hedgeScore);
-      setOpportunities(matches.slice(0, 10)); // TOP 10 ONLY
+      
+      // FIXED: Show top 50 instead of hardcoded 10
+      setOpportunities(matches.slice(0, 50));
       
       setError('⚠️ Using fallback data - check if backend is running at ' + API_BASE_URL);
       console.error('Search error:', err);
